@@ -324,6 +324,9 @@ on init
     write /proc/sys/kernel/hung_task_timeout_secs 0
     write /proc/cpu/alignment 4
     
+    # Grouping tasks tweak
+    write /proc/sys/kernel/sched_autogroup_enabled 1
+    
     # Adjust and set MQ-Deadline's fifo_batch IO scheduling nodes to 8 (instead of the default / stock value of 16) for a overall improved balance between latency and throughput;
     write /sys/block/nullb0/queue/iosched/fifo_batch 8
     write /sys/block/sda/queue/iosched/fifo_batch 8
@@ -390,6 +393,15 @@ on init
 
     # set fwmark on accepted sockets
     write /proc/sys/net/ipv4/tcp_fwmark_accept 1
+    
+    #Enable ECN Negotiation by default
+    write /proc/sys/net/ipv4/tcp_ecn 1
+    
+    #Enable Fast Socket open for receiver and sender
+    write /proc/sys/net/ipv4/tcp_fastopen 3
+    
+    #Disable Spi CRC
+    write /sys/module/mmc_core/use_spi_crc 0
 
     # disable icmp redirects
     write /proc/sys/net/ipv4/conf/all/accept_redirects 0
@@ -1109,6 +1121,7 @@ on boot && property:ro.config.low_ram=true
     write /proc/sys/vm/dirty_background_ratio  10
     write /proc/sys/vm/compact_unevictable_allowed 0
     write /proc/sys/vm/dirty_ratio 30
+    write /proc/sys/vm/vfs_cache_pressure 20
     write /proc/sys/vm/oom_dump_tasks 0
     write /proc/sys/vm/oom_kill_allocating_task 1
     write /proc/sys/vm/stat_interval 1500
@@ -1378,7 +1391,18 @@ on property:security.perf_harden=1
     write /proc/sys/kernel/sched_migration_cost_ns 1000000
     write /proc/sys/kernel/sched_min_granularity_ns 2000000
     
+#Always allow sched boosting on top-app tasks
+    write /proc/sys/kernel/sched_min_task_util_for_colocation 0
+    
     write /proc/sys/kernel/sched_pelt_multiplier 2
+    
+#Enable Timer Migration
+    write /proc/sys/kernel/timer_migration 1
+    
+#MGLRU
+    write /sys/kernel/mm/lru_gen/min_ttl_ms 5000
+    
+
     
     
 
