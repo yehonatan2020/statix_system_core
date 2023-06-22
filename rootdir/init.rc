@@ -4,6 +4,7 @@
 # This is a common source of Android security bugs.
 #
 
+
 import /init.environ.rc
 import /system/etc/init/hw/init.usb.rc
 import /init.${ro.hardware}.rc
@@ -275,6 +276,23 @@ on init
     
     # Properly mount the debugfs sys path;
     mount -t debugfs none /sys/kernel/debug
+    
+# Disable the debug_enabled as well as the sched_debug sysfs nodes for both performance and overhead reasons;
+    write /sys/kernel/debug/debug_enabled N
+    write /sys/kernel/debug/sched_debug N
+    
+    # Disable the GENTLE_FAIR_SLEEPERS scheduling flag for reducing the average total runtime for sleepers (processes that is idling / sleeping for a long time) and give instead that time to active running tasks. In return, this will significantly improve both overall system responsivness and UI fluidity;
+    write /sys/kernel/debug/sched_features "NO_GENTLE_FAIR_SLEEPERS"
+
+# Disable the NONTASK_CAPACITY scheduling flag to avoid suffocating already busy CPUs with tasks and thus allow / let the kernel task scheduler to select and pick a idling CPU core for more intelligent and logical task placement. In return, this improves task start latencies and executions of new tasks;
+    write /sys/kernel/debug/sched_features "NO_NONTASK_CAPACITY"
+    
+    # Disable the usage of Transparent Huge Pages for freeing up both hardware biased resources and CPU clock cycles (for power consumption and general efficiency reasons) that would otherwise get lost and thrown straight into the dirt;
+    write /sys/kernel/mm/transparent_hugepage/khugepaged/defrag 0
+    write /sys/kernel/mm/transparent_hugepage/defrag "never"
+    write /sys/kernel/mm/transparent_hugepage/enabled "never"
+    write /sys/kernel/mm/transparent_hugepage/shmem_enabled "deny"
+    write /sys/kernel/mm/transparent_hugepage/use_zero_page 0
 
     symlink /dev/binderfs/binder /dev/binder
     symlink /dev/binderfs/hwbinder /dev/hwbinder
@@ -366,6 +384,11 @@ on init
 
     # Allow the foreground CPUSet to use a Prime CPU core for both improved task initializations and device performance;
     write /dev/cpuset/foreground/cpus "0-5,7"
+    
+    # Configure and increase the default set sleep values for the garbage collection (=GC) kernel threads for reducing its power consumption impact thanks to less frequent active wake-ups;
+    write  /dev/sys/fs/by-name/userdata/gc_max_sleep_time 300000
+    write  /dev/sys/fs/by-name/userdata/gc_min_sleep_time 150000
+    write  /dev/sys/fs/by-name/userdata/gc_no_gc_sleep_time 1500000
 
     # scheduler tunables
     # Disable auto-scaling of scheduler tunables with hotplug. The tunables
@@ -373,13 +396,19 @@ on init
     # cpu cores.
     write /proc/sys/kernel/sched_tunable_scaling 0
     write /proc/sys/kernel/sched_latency_ns 15000000
-    write /proc/sys/kernel/sched_wakeup_granularity_ns 2000000
+    
+    # Set the value for the sched_wakeup_granularity_ns sysfs node so it can match and catch up at a optimal level to what the sched_min_granularity_ns and sched_latency_ns is set to;
+    write /proc/sys/kernel/sched_wakeup_granularity_ns 10000000
+    
+    # Set & increase the value for the netdev_max_backlog node from 1000 up to 16384 for reducing the chance and risk of losing packets on high performance / speed network cards;
+    write /proc/sys/net/core/netdev_max_backlog 16384
+    
     write /proc/sys/kernel/sched_child_runs_first 0
 
     write /proc/sys/kernel/randomize_va_space 2
     write /proc/sys/vm/mmap_min_addr 32768
     write /proc/sys/net/ipv4/ping_group_range "0 2147483647"
-    write /proc/sys/net/unix/max_dgram_qlen 600
+    write /proc/sys/net/unix/max_dgram_qlen 512
 
     # Assign reasonable ceiling values for socket rcv/snd buffers.
     # These should almost always be overridden by the target per the
@@ -396,6 +425,9 @@ on init
     
     #Enable ECN Negotiation by default
     write /proc/sys/net/ipv4/tcp_ecn 1
+    
+    # Having the tcp_slow_start_after_idle node enabled both compromises as well as sacrifices overall persistent single connection performance, so lets silence this one for good;
+    write /proc/sys/net/ipv4/tcp_slow_start_after_idle 0
     
     #Enable Fast Socket open for receiver and sender
     write /proc/sys/net/ipv4/tcp_fastopen 3
@@ -1115,11 +1147,13 @@ on zygote-start && property:ro.crypto.state=encrypted && property:ro.crypto.type
     start zygote
     start zygote_secondary
 
+# Configure major key aspects of the virtual memory stack towards improved efficiency and throughput in the first hand while keeping any potential system latencies at a minimum;
 on boot && property:ro.config.low_ram=true
     # Tweak background writeout
     write /proc/sys/vm/dirty_expire_centisecs 200
     write /proc/sys/vm/dirty_background_ratio  10
     write /proc/sys/vm/compact_unevictable_allowed 0
+    write /proc/sys/vm/compaction_proactiveness 0
     write /proc/sys/vm/dirty_ratio 30
     write /proc/sys/vm/vfs_cache_pressure 20
     write /proc/sys/vm/oom_dump_tasks 0
@@ -1178,15 +1212,21 @@ on boot
     write /sys/module/blk_cgroup/parameters/blkcg_debug_stats N
     write /sys/module/bluetooth/parameters/disable_ertm Y
     write /sys/module/bluetooth/parameters/disable_esco Y
+    write /sys/module/cec/parameters/debug 0
+    write /sys/module/cec/parameters/debug_phys_addr N
+    write /sys/module/cfg80211/parameters/cfg80211_disable_40mhz_24ghz Y
     write /sys/module/cryptomgr/parameters/notests Y
-    write /sys/module/debug_reboot/parameters/enable N
-    write /sys/module/dw3000/parameters/stats_enabled N
+    write /sys/module/drm_kms_helper/parameters/poll N
+    
     write /sys/module/edac_core/parameters/edac_mc_log_ce 0
     write /sys/module/edac_core/parameters/edac_mc_log_ue 0
+    write sys/module/edac_core/parameters/edac_mc_poll_msec 0
+    
     write /sys/module/efi_pstore/parameters/pstore_disable Y
     write /sys/module/exynos_drm/parameters/debug_dump_mask 0
-    write /sys/module/gspca_main/parameters/debug 0
-    write /sys/module/hid/parameters/debug 0
+    write /sys/module/exynos_drm/parameters/event_print_max 0
+    
+    write /sys/module/gxp/parameters/dsp_fw_auth_disable 1
     write /sys/module/hid/parameters/ignore_special_drivers 1
     write /sys/module/hid_apple/parameters/fnmode 0
     write /sys/module/hid_apple/parameters/iso_layout 0
@@ -1201,28 +1241,25 @@ on boot
     write /sys/module/ip_gre/parameters/log_ecn_error N
     write /sys/module/ipip/parameters/log_ecn_error N
     write /sys/module/janeiro/parameters/wdt_disable Y
-    write /sys/module/keydebug/parameters/kernel_top_enable 0
+    write /sys/module/kernel/parameters/ignore_rlimit_data Y
     write /sys/module/keydebug/parameters/show_dstate_enable 0
-    write /sys/module/keydebug/parameters/showallcpus_enable 0
+    write /sys/module/pcie_aspm/parameters/policy "powersave"
     write /sys/module/printk/parameters/console_suspend Y
     write /sys/module/rfcomm/parameters/disable_cfc Y
-    write /sys/module/scsi_mod/parameters/scsi_logging_level 0
     write /sys/module/sit/parameters/log_ecn_error N
     write /sys/module/spurious/parameters/noirqdebug Y
     write /sys/module/suspend/parameters/pm_test_delay 0
-    write /sys/module/v4l2_mem2mem/parameters/debug N
-    write /sys/module/videobuf2_common/parameters/debug 0
-    write /sys/module/videobuf2_dma_sg/parameters/debug 0
-    write /sys/module/videobuf2_v4l2/parameters/debug 0
+    write /sys/module/wacom/parameters/touch_arbitration N
     
-    # Set and increase the minimum target scaling frequencies for the MIF and INT devfreq node paths for improving overall low-level SOC efficiency while reducing the amount of missed frames at the same time during interactive user interactions;
-    write /sys/class/devfreq/17000010.devfreq_mif/exynos_data/debug_scaling_devfreq_min 1014000
-    write /sys/class/devfreq/17000010.devfreq_mif/scaling_devfreq_min 1014000
-    write /sys/class/devfreq/17000020.devfreq_int/exynos_data/debug_scaling_devfreq_min 200000
-    write /sys/class/devfreq/17000020.devfreq_int/scaling_devfreq_min 200000
+    # Configure the Sched_Pixel CPU governor across all the three clusters for improving overall central processing performance by biasing the selective frequency scaling logic toward rapid userspace interrupts for keeping the system both smooth and responsive while reducing overall power consumption after the whole idea and theory about the usage of "nominal" CPU frequencies that was a pretty golden governor feature during the old and classic HMP and Interactive CPU governor days;
     
+# Reduce the scheduling period window down to 80 (from default 100) for the GPU so it matches the set idle_hysteresis value because it's by simple and easy neat design plain stupid letting the kthreads occupying the rendering pipeline while the GPU is supposed to be busy n' occupied with its idling period;
     write /sys/devices/platform/28000000.mali/csg_scheduling_period 80
+
+# Set and decrease the idle_hysteresis_time value to 80 so it matches the related scheduling period window here above;
     write /sys/devices/platform/28000000.mali/idle_hysteresis_time 80
+    
+# Set the allowed GPU frequency to the 251Mhz step during display power off / screen panel power collapses states for reducing overall power consumption because having it set to the 400Mhz frequency target step is just inefficient and does burn through more power than what is actually even needed;
     write /sys/devices/platform/28000000.mali/pm_poweroff "251000 2 0"
     
     # LITTLE Cluster;
@@ -1239,15 +1276,42 @@ on boot
     write /sys/devices/system/cpu/cpufreq/policy6/sched_pixel/lcpi_threshold 4
     write /sys/devices/system/cpu/cpufreq/policy6/sched_pixel/limit_frequency 1426000
     write /sys/devices/system/cpu/cpufreq/policy6/sched_pixel/spc_threshold 20
+    
+    # Shift directly at runtime to use and utilize the newer and far more efficient Timer Events Oriented (=TEO) cpuidle governor because its default characteristics is more ideal for the idling process and phase on mobile handheld devices just like ours;
+    write /sys/devices/system/cpu/cpuidle/current_governor teo
+    
+    # Do the same about the garbage collection kernel thread wake-ups that we just did in the initial phase of this config;
+    write /sys/fs/f2fs/dm-38/gc_max_sleep_time 300000
+    write /sys/fs/f2fs/dm-38/gc_min_sleep_time 150000
+    write /sys/fs/f2fs/dm-38/gc_no_gc_sleep_time 1500000
+    write /sys/fs/f2fs/sda5/gc_max_sleep_time 300000
+    write /sys/fs/f2fs/sda5/gc_min_sleep_time 150000
+    write /sys/fs/f2fs/sda5/gc_no_gc_sleep_time 1500000
+    write /sys/fs/f2fs/sda6/gc_max_sleep_time 300000
+    write /sys/fs/f2fs/sda6/gc_min_sleep_time 150000
+    write /sys/fs/f2fs/sda6/gc_no_gc_sleep_time 1500000
+    write /sys/fs/f2fs/sda7/gc_max_sleep_time 300000
+    write /sys/fs/f2fs/sda7/gc_min_sleep_time 150000
+    write /sys/fs/f2fs/sda7/gc_no_gc_sleep_time 1500000
+    write /sys/fs/f2fs/sda8/gc_max_sleep_time 300000
+    write /sys/fs/f2fs/sda8/gc_min_sleep_time 150000
+    write /sys/fs/f2fs/sda8/gc_no_gc_sleep_time 1500000
 
-    # Do the same about GC_URGENT_SLEEP_TIME here as well that we just did in the initial phase and section of this config;
+# Do the same about GC_URGENT_SLEEP_TIME here as well that we just did in the initial phase and section of this config;
     write /sys/fs/f2fs/dm-38/gc_urgent_sleep_time 5
     write /sys/fs/f2fs/sda5/gc_urgent_sleep_time 5
     write /sys/fs/f2fs/sda6/gc_urgent_sleep_time 5
     write /sys/fs/f2fs/sda7/gc_urgent_sleep_time 5
     write /sys/fs/f2fs/sda8/gc_urgent_sleep_time 5
+    
+# Do the same about the f2fs IOSTAT_ENABLE node as well that we just did in the initial phase and section of this config;
+    write /sys/fs/f2fs/dm-38/iostat_enable 0
+    write /sys/fs/f2fs/sda5/iostat_enable 0
+    write /sys/fs/f2fs/sda6/iostat_enable 0
+    write /sys/fs/f2fs/sda7/iostat_enable 0
+    write /sys/fs/f2fs/sda8/iostat_enable 0
 
-    # set readahead multiplier for POSIX_FADV_SEQUENTIAL files
+ # set readahead multiplier for POSIX_FADV_SEQUENTIAL files
     write /dev/sys/fs/by-name/userdata/seq_file_ra_mul 16
 
     # limit discard size to 128MB in order to avoid long IO latency
@@ -1373,7 +1437,6 @@ on property:security.perf_harden=1 && property:sys.init.perf_lsm_hooks=""
 # sysprops to be able to indirectly set these sysctls.
 on property:security.perf_harden=0
     write /proc/sys/kernel/perf_event_max_sample_rate ${debug.perf_event_max_sample_rate:-100000}
-    write /proc/sys/kernel/perf_cpu_time_max_percent ${debug.perf_cpu_time_max_percent:-25}
     write /proc/sys/kernel/perf_event_mlock_kb ${debug.perf_event_mlock_kb:-516}
     
 # Default values.
@@ -1382,19 +1445,27 @@ on property:security.perf_harden=1
     write /proc/sys/kernel/perf_cpu_time_max_percent 0
     write /proc/sys/kernel/perf_event_mlock_kb 516
     
-    # Don't allow to flood or swarm the kernel printk console with warnings messages about potentially hung tasks per default;
+# Don't allow to flood or swarm the kernel printk console with warnings messages about potentially hung tasks per default;
     write /proc/sys/kernel/hung_task_check_count 0
     write /proc/sys/kernel/hung_task_warnings 0
+    
+# Disable the panic_on_oops sys node for a "stronger" / increased perception of both system & kernel stability;
     write /proc/sys/kernel/panic_on_oops 0
+
+# Decrease the lend-break-time for perf reasons;
     write /proc/sys/fs/lease-break-time 20
 
-    write /proc/sys/kernel/sched_migration_cost_ns 1000000
+# Both set and reduce the minimum task scheduling window period from default 3ms value down to a new value of 2ms;
     write /proc/sys/kernel/sched_min_granularity_ns 2000000
     
 #Always allow sched boosting on top-app tasks
     write /proc/sys/kernel/sched_min_task_util_for_colocation 0
     
+# Considering the obvious fact that we have configured a big amount of stuff for overall improved power savings / reduced power consumption - lets use this to our advantage by bumping the 'sched_pelt_multiplier' node from the default value of x1 (=32ms half-life decay time) which is ideal for servers) up to x2 (=16ms half-life decay time) that is more optimal for interactive usage patterns - specially for devices with 60Hz+ refresh rate capable screen panels and beyond;
     write /proc/sys/kernel/sched_pelt_multiplier 2
+    
+# Disable gathering of scheduling stats as for the same reasons that we have bailed the existing IO stats nodes;
+    write  /proc/sys/kernel/sched_schedstats 0
     
 #Enable Timer Migration
     write /proc/sys/kernel/timer_migration 1
