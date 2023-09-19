@@ -250,23 +250,15 @@ on init
     
     # Properly mount the debugfs sys path;
     mount -t debugfs none /sys/kernel/debug
-    
-# Disable the debug_enabled as well as the sched_debug sysfs nodes for both performance and overhead reasons;
-    write /sys/kernel/debug/debug_enabled N
-    write /sys/kernel/debug/sched_debug N
-    
+        
     # Disable the GENTLE_FAIR_SLEEPERS scheduling flag for reducing the average total runtime for sleepers (processes that is idling / sleeping for a long time) and give instead that time to active running tasks. In return, this will significantly improve both overall system responsivness and UI fluidity;
     write /sys/kernel/debug/sched_features "NO_GENTLE_FAIR_SLEEPERS"
 
-# Disable the NONTASK_CAPACITY scheduling flag to avoid suffocating already busy CPUs with tasks and thus allow / let the kernel task scheduler to select and pick a idling CPU core for more intelligent and logical task placement. In return, this improves task start latencies and executions of new tasks;
+    # Enable the NEXT_BUDDY scheduling flag for overall improved cache locality thanks to that we are scheduling the last woken task first because that specific task will most likely touch the same chunk of data fragment as it did before;
+    write /sys/kernel/debug/sched_features "NEXT_BUDDY"
+
+    # Disable the NONTASK_CAPACITY scheduling flag to avoid suffocating already busy CPUs with tasks and thus allow / let the kernel task scheduler to select and pick a idling CPU core for more intelligent and logical task placement. In return, this improves task start latencies and executions of new tasks;
     write /sys/kernel/debug/sched_features "NO_NONTASK_CAPACITY"
-    
-    # Disable the usage of Transparent Huge Pages for freeing up both hardware biased resources and CPU clock cycles (for power consumption and general efficiency reasons) that would otherwise get lost and thrown straight into the dirt;
-    write /sys/kernel/mm/transparent_hugepage/khugepaged/defrag 0
-    write /sys/kernel/mm/transparent_hugepage/defrag "never"
-    write /sys/kernel/mm/transparent_hugepage/enabled "never"
-    write /sys/kernel/mm/transparent_hugepage/shmem_enabled "deny"
-    write /sys/kernel/mm/transparent_hugepage/use_zero_page 0
 
     symlink /dev/binderfs/binder /dev/binder
     symlink /dev/binderfs/hwbinder /dev/hwbinder
@@ -316,9 +308,6 @@ on init
     write /proc/sys/kernel/hung_task_timeout_secs 0
     write /proc/cpu/alignment 4
     
-    # Grouping tasks tweak
-    write /proc/sys/kernel/sched_autogroup_enabled 1
-    
     # Adjust and set MQ-Deadline's fifo_batch IO scheduling nodes to 8 (instead of the default / stock value of 16) for a overall improved balance between latency and throughput;
     write /sys/block/nullb0/queue/iosched/fifo_batch 8
     write /sys/block/sda/queue/iosched/fifo_batch 8
@@ -334,35 +323,17 @@ on init
     write /sys/block/sdc/queue/iosched/front_merges 0
     write /sys/block/sdd/queue/iosched/front_merges 0
     write /sys/block/sde/queue/iosched/front_merges 0
-
-    # Reduce the total time between how often reads can happen from default 500ms down to 100ms which is a far more ideal value for systems with a lot of userspace bound interactions;
-    write /sys/block/nullb0/queue/iosched/read_expire 100
-    write /sys/block/sda/queue/iosched/read_expire 100
-    write /sys/block/sdb/queue/iosched/read_expire 100
-    write /sys/block/sdc/queue/iosched/read_expire 100
-    write /sys/block/sdd/queue/iosched/read_expire 100
-    write /sys/block/sde/queue/iosched/read_expire 100
-
-    # Set and reduce writes_starved to 1 (instead of default 2) for avoid delaying queued in-the-line writes for too long. This will slightly improve MQ-Deadline's performance in scenarios when there is pending writes coming in a massive swarm;
-    write /sys/block/nullb0/queue/iosched/writes_starved 1
-    write /sys/block/sda/queue/iosched/writes_starved 1
-    write /sys/block/sdb/queue/iosched/writes_starved 1
-    write /sys/block/sdc/queue/iosched/writes_starved 1
-    write /sys/block/sdd/queue/iosched/writes_starved 1
-    write /sys/block/sde/queue/iosched/writes_starved 1
     
     # Enable the latency_sensitive flag for both foreground and top-app - which mimics the old SchedTune prefer-idle flag;
     write /dev/cpuctl/foreground/cpu.uclamp.latency_sensitive 1
     write /dev/cpuctl/top-app/cpu.uclamp.latency_sensitive 1
 
+    # Restrict / limit foreground CPUSet tasks to 75% processing utilization for overall power saving & efficiency bound reasons;
+    write /dev/cpuctl/foreground/cpu.uclamp.max 75
 
     # Allow the foreground CPUSet to use a Prime CPU core for both improved task initializations and device performance;
     write /dev/cpuset/foreground/cpus "0-5,7"
-    
-    # Configure and increase the default set sleep values for the garbage collection (=GC) kernel threads for reducing its power consumption impact thanks to less frequent active wake-ups;
-    write  /dev/sys/fs/by-name/userdata/gc_max_sleep_time 300000
-    write  /dev/sys/fs/by-name/userdata/gc_min_sleep_time 150000
-    write  /dev/sys/fs/by-name/userdata/gc_no_gc_sleep_time 1500000
+
 
     # scheduler tunables
     # Disable auto-scaling of scheduler tunables with hotplug. The tunables
@@ -371,12 +342,18 @@ on init
     write /proc/sys/kernel/sched_tunable_scaling 0
     write /proc/sys/kernel/sched_latency_ns 15000000
     
-    # Set the value for the sched_wakeup_granularity_ns sysfs node so it can match and catch up at a optimal level to what the sched_min_granularity_ns and sched_latency_ns is set to;
-    write /proc/sys/kernel/sched_wakeup_granularity_ns 10000000
-    
     # Set & increase the value for the netdev_max_backlog node from 1000 up to 16384 for reducing the chance and risk of losing packets on high performance / speed network cards;
     write /proc/sys/net/core/netdev_max_backlog 16384
+
+    # Set the TCP Congestion Algorithm to Cubic per default;
+    write /proc/sys/net/ipv4/tcp_congestion_control cubic
+
+    # Enable Explicit Congestion Notification for both incoming and outgoing connections which helps with packet losses;
+    write /proc/sys/net/ipv4/tcp_ecn 1
     
+    # Having the tcp_slow_start_after_idle node enabled both compromises as well as sacrifices overall persistent single connection performance, so lets silence this one for good;
+    write /proc/sys/net/ipv4/tcp_slow_start_after_idle 0
+
     write /proc/sys/kernel/sched_child_runs_first 0
 
     write /proc/sys/kernel/randomize_va_space 2
@@ -397,17 +374,8 @@ on init
     # set fwmark on accepted sockets
     write /proc/sys/net/ipv4/tcp_fwmark_accept 1
     
-    #Enable ECN Negotiation by default
-    write /proc/sys/net/ipv4/tcp_ecn 1
-    
     # Having the tcp_slow_start_after_idle node enabled both compromises as well as sacrifices overall persistent single connection performance, so lets silence this one for good;
     write /proc/sys/net/ipv4/tcp_slow_start_after_idle 0
-    
-    #Enable Fast Socket open for receiver and sender
-    write /proc/sys/net/ipv4/tcp_fastopen 3
-    
-    #Disable Spi CRC
-    write /sys/module/mmc_core/use_spi_crc 0
 
     # disable icmp redirects
     write /proc/sys/net/ipv4/conf/all/accept_redirects 0
@@ -1163,6 +1131,47 @@ on boot && property:ro.config.low_ram=true
     write /proc/sys/vm/swappiness 20
     write /proc/sys/vm/watermark_scale_factor 200
 
+    # Having a high value for discard_max_bytes is a source for latencies whenever large discards are issued by the kernel. Fix this issue by manually forcing a lower set value by default so the mentioned latency issues have a lesser chance to happen;
+    write /sys/block/sda/queue/discard_max_bytes 134217728
+    write /sys/block/sdb/queue/discard_max_bytes 134217728
+    write /sys/block/sdc/queue/discard_max_bytes 134217728
+    write sys/block/sdd/queue/discard_max_bytes 134217728
+
+    ####################################################
+
+# The default / stock IO scheduler values for MQ-Deadline is acceptable but not great for mobile handheld values where IO latencies is more important compared to general throughput, so lets remedy this by properly configuring MQ-Deadline for delivering the best possible performance for everyday usage;
+
+# Not_Purgatory's preferred MQ-Deadline sched profile;
+
+# Set async_depth to 46 per default across the big board;
+write /sys/block/nullb0/queue/iosched/async_depth 46
+write /sys/block/sda/queue/iosched/async_depth 46
+write /sys/block/sdb/queue/iosched/async_depth 46
+write /sys/block/sdc/queue/iosched/async_depth 46
+write /sys/block/sdd/queue/iosched/async_depth 46
+
+# Adjust and set MQ-Deadline's fifo_batch IO scheduling nodes to 8 (instead of the default / stock value of 16) for a overall improved balance between latency and throughput;
+write /sys/block/nullb0/queue/iosched/fifo_batch 8
+write /sys/block/sda/queue/iosched/fifo_batch 8
+write /sys/block/sdb/queue/iosched/fifo_batch 8
+write /sys/block/sdc/queue/iosched/fifo_batch 8
+write /sys/block/sdd/queue/iosched/fifo_batch 8
+
+# Don't allow MQ-Deadline to waste or throw away important CPU clock cycles on trying to front IO merge requests calls;
+write /sys/block/nullb0/queue/iosched/front_merges 0
+write /sys/block/sda/queue/iosched/front_merges 0
+write /sys/block/sdb/queue/iosched/front_merges 0
+write /sys/block/sdc/queue/iosched/front_merges 0
+write /sys/block/sdd/queue/iosched/front_merges 0
+
+####################################################
+
+# Disable / delete the existence of the sde block device from the system at each boot because this device seems to used more for weird debugging quirks than for true IO scheduling;
+write /sys/block/sde/device/delete 1
+
+# Force disable the kernel devcoredump mechanism for both privacy n' integrity and (potential) resource hogging reasons;
+write /sys/class/devcoredump/disabled 1
+
 on boot
     # basic network init
     ifup lo
@@ -1210,22 +1219,12 @@ on boot
     write /sys/module/bcmdhd4389/parameters/logdump_ecntr_enable 0
     write /sys/module/binder/parameters/debug_mask 0
     write /sys/module/binder_alloc/parameters/debug_mask 0
-    write /sys/module/blk_cgroup/parameters/blkcg_debug_stats N
     write /sys/module/bluetooth/parameters/disable_ertm Y
     write /sys/module/bluetooth/parameters/disable_esco Y
     write /sys/module/cec/parameters/debug 0
     write /sys/module/cec/parameters/debug_phys_addr N
-    write /sys/module/cfg80211/parameters/cfg80211_disable_40mhz_24ghz Y
     write /sys/module/cryptomgr/parameters/notests Y
     write /sys/module/drm_kms_helper/parameters/poll N
-    
-    write /sys/module/edac_core/parameters/edac_mc_log_ce 0
-    write /sys/module/edac_core/parameters/edac_mc_log_ue 0
-    write sys/module/edac_core/parameters/edac_mc_poll_msec 0
-    
-    write /sys/module/efi_pstore/parameters/pstore_disable Y
-    write /sys/module/exynos_drm/parameters/debug_dump_mask 0
-    write /sys/module/exynos_drm/parameters/event_print_max 0
     
     write /sys/module/gxp/parameters/dsp_fw_auth_disable 1
     write /sys/module/hid/parameters/ignore_special_drivers 1
@@ -1237,20 +1236,6 @@ on boot
     write /sys/module/hid_magicmouse/parameters/emulate_scroll_wheel N
     write /sys/module/hid_magicmouse/parameters/scroll_speed 0
     write /sys/module/hid_steam/parameters/lizard_mode N
-    write /sys/module/ip6_gre/parameters/log_ecn_error N
-    write /sys/module/ip6_tunnel/parameters/log_ecn_error N
-    write /sys/module/ip_gre/parameters/log_ecn_error N
-    write /sys/module/ipip/parameters/log_ecn_error N
-    write /sys/module/janeiro/parameters/wdt_disable Y
-    write /sys/module/kernel/parameters/ignore_rlimit_data Y
-    write /sys/module/keydebug/parameters/show_dstate_enable 0
-    write /sys/module/pcie_aspm/parameters/policy "powersave"
-    write /sys/module/printk/parameters/console_suspend Y
-    write /sys/module/rfcomm/parameters/disable_cfc Y
-    write /sys/module/sit/parameters/log_ecn_error N
-    write /sys/module/spurious/parameters/noirqdebug Y
-    write /sys/module/suspend/parameters/pm_test_delay 0
-    write /sys/module/wacom/parameters/touch_arbitration N
     
     # Configure the Sched_Pixel CPU governor across all the three clusters for improving overall central processing performance by biasing the selective frequency scaling logic toward rapid userspace interrupts for keeping the system both smooth and responsive while reducing overall power consumption after the whole idea and theory about the usage of "nominal" CPU frequencies that was a pretty golden governor feature during the old and classic HMP and Interactive CPU governor days;
     
@@ -1263,54 +1248,8 @@ on boot
 # Set the allowed GPU frequency to the 251Mhz step during display power off / screen panel power collapses states for reducing overall power consumption because having it set to the 400Mhz frequency target step is just inefficient and does burn through more power than what is actually even needed;
     write /sys/devices/platform/28000000.mali/pm_poweroff "251000 2 0"
     
-    # LITTLE Cluster;
-    write /sys/devices/system/cpu/cpufreq/policy0/sched_pixel/lcpi_threshold 2
-    write /sys/devices/system/cpu/cpufreq/policy0/sched_pixel/limit_frequency 930000
-    write /sys/devices/system/cpu/cpufreq/policy0/sched_pixel/spc_threshold 44
-
-    # Big Cluster;
-    write /sys/devices/system/cpu/cpufreq/policy4/sched_pixel/lcpi_threshold 4
-   write /sys/devices/system/cpu/cpufreq/policy4/sched_pixel/limit_frequency 1328000
-    write /sys/devices/system/cpu/cpufreq/policy4/sched_pixel/spc_threshold 25
-
-    # Prime Cluster;
-    write /sys/devices/system/cpu/cpufreq/policy6/sched_pixel/lcpi_threshold 4
-    write /sys/devices/system/cpu/cpufreq/policy6/sched_pixel/limit_frequency 1426000
-    write /sys/devices/system/cpu/cpufreq/policy6/sched_pixel/spc_threshold 20
-    
     # Shift directly at runtime to use and utilize the newer and far more efficient Timer Events Oriented (=TEO) cpuidle governor because its default characteristics is more ideal for the idling process and phase on mobile handheld devices just like ours;
     write /sys/devices/system/cpu/cpuidle/current_governor teo
-    
-    # Do the same about the garbage collection kernel thread wake-ups that we just did in the initial phase of this config;
-    write /sys/fs/f2fs/dm-38/gc_max_sleep_time 300000
-    write /sys/fs/f2fs/dm-38/gc_min_sleep_time 150000
-    write /sys/fs/f2fs/dm-38/gc_no_gc_sleep_time 1500000
-    write /sys/fs/f2fs/sda5/gc_max_sleep_time 300000
-    write /sys/fs/f2fs/sda5/gc_min_sleep_time 150000
-    write /sys/fs/f2fs/sda5/gc_no_gc_sleep_time 1500000
-    write /sys/fs/f2fs/sda6/gc_max_sleep_time 300000
-    write /sys/fs/f2fs/sda6/gc_min_sleep_time 150000
-    write /sys/fs/f2fs/sda6/gc_no_gc_sleep_time 1500000
-    write /sys/fs/f2fs/sda7/gc_max_sleep_time 300000
-    write /sys/fs/f2fs/sda7/gc_min_sleep_time 150000
-    write /sys/fs/f2fs/sda7/gc_no_gc_sleep_time 1500000
-    write /sys/fs/f2fs/sda8/gc_max_sleep_time 300000
-    write /sys/fs/f2fs/sda8/gc_min_sleep_time 150000
-    write /sys/fs/f2fs/sda8/gc_no_gc_sleep_time 1500000
-
-# Do the same about GC_URGENT_SLEEP_TIME here as well that we just did in the initial phase and section of this config;
-    write /sys/fs/f2fs/dm-38/gc_urgent_sleep_time 5
-    write /sys/fs/f2fs/sda5/gc_urgent_sleep_time 5
-    write /sys/fs/f2fs/sda6/gc_urgent_sleep_time 5
-    write /sys/fs/f2fs/sda7/gc_urgent_sleep_time 5
-    write /sys/fs/f2fs/sda8/gc_urgent_sleep_time 5
-    
-# Do the same about the f2fs IOSTAT_ENABLE node as well that we just did in the initial phase and section of this config;
-    write /sys/fs/f2fs/dm-38/iostat_enable 0
-    write /sys/fs/f2fs/sda5/iostat_enable 0
-    write /sys/fs/f2fs/sda6/iostat_enable 0
-    write /sys/fs/f2fs/sda7/iostat_enable 0
-    write /sys/fs/f2fs/sda8/iostat_enable 0
 
  # set readahead multiplier for POSIX_FADV_SEQUENTIAL files
     write /dev/sys/fs/by-name/userdata/seq_file_ra_mul 16
@@ -1453,31 +1392,15 @@ on property:security.perf_harden=1
 # Disable the panic_on_oops sys node for a "stronger" / increased perception of both system & kernel stability;
     write /proc/sys/kernel/panic_on_oops 0
 
-# Decrease the lend-break-time for perf reasons;
-    write /proc/sys/fs/lease-break-time 20
+# Don't allow the kernel to panic or crash when a soft lockup is detected - wait instead til' hard kernel lockup now is detected;
+    write /proc/sys/kernel/softlockup_panic 0
 
 # Both set and reduce the minimum task scheduling window period from default 3ms value down to a new value of 2ms;
     write /proc/sys/kernel/sched_min_granularity_ns 2000000
     
-#Always allow sched boosting on top-app tasks
-    write /proc/sys/kernel/sched_min_task_util_for_colocation 0
-    
-# Considering the obvious fact that we have configured a big amount of stuff for overall improved power savings / reduced power consumption - lets use this to our advantage by bumping the 'sched_pelt_multiplier' node from the default value of x1 (=32ms half-life decay time) which is ideal for servers) up to x2 (=16ms half-life decay time) that is more optimal for interactive usage patterns - specially for devices with 60Hz+ refresh rate capable screen panels and beyond;
-    write /proc/sys/kernel/sched_pelt_multiplier 2
-    
-# Disable gathering of scheduling stats as for the same reasons that we have bailed the existing IO stats nodes;
-    write  /proc/sys/kernel/sched_schedstats 0
-    
-#Enable Timer Migration
-    write /proc/sys/kernel/timer_migration 1
-    
-#MGLRU
-    write /sys/kernel/mm/lru_gen/min_ttl_ms 5000
-    
 
     
     
-
 # This property can be set only on userdebug/eng. See neverallow rule in
 # /system/sepolicy/private/property.te .
 on property:security.lower_kptr_restrict=1
@@ -1560,14 +1483,6 @@ on userspace-reboot-resume
 on property:sys.boot_completed=1 && property:sys.init.userspace_reboot.in_progress=1
   setprop sys.init.userspace_reboot.in_progress ""
 
-# Multi-Gen LRU Experiment
-on property:persist.device_config.mglru_native.lru_gen_config=none
-  write /sys/kernel/mm/lru_gen/enabled 0
-on property:persist.device_config.mglru_native.lru_gen_config=core
-  write /sys/kernel/mm/lru_gen/enabled 1
-on property:persist.device_config.mglru_native.lru_gen_config=core_and_mm_walk
-  write /sys/kernel/mm/lru_gen/enabled 3
-on property:persist.device_config.mglru_native.lru_gen_config=core_and_nonleaf_young
-  write /sys/kernel/mm/lru_gen/enabled 5
-on property:persist.device_config.mglru_native.lru_gen_config=all
-  write /sys/kernel/mm/lru_gen/enabled 7
+# Enable multi-gen LRU for getting an overall optimization improvement to memory page reclaim and that as well improves system performance under memory pressure;
+write /sys/kernel/mm/lru_gen/enabled Y
+write /sys/kernel/mm/lru_gen/min_ttl_ms 5000
