@@ -27,7 +27,6 @@
 #include <android-base/parseint.h>
 #include <android-base/properties.h>
 #include <android-base/strings.h>
-#include <hidl-util/FQName.h>
 #include <processgroup/processgroup.h>
 #include <system/thread_defs.h>
 
@@ -201,24 +200,6 @@ Result<void> ServiceParser::ParsePriority(std::vector<std::string>&& args) {
 Result<void> ServiceParser::ParseInterface(std::vector<std::string>&& args) {
     const std::string& interface_name = args[1];
     const std::string& instance_name = args[2];
-
-    // AIDL services don't use fully qualified names and instead just use "interface aidl <name>"
-    if (interface_name != "aidl") {
-        FQName fq_name;
-        if (!FQName::parse(interface_name, &fq_name)) {
-            return Error() << "Invalid fully-qualified name for interface '" << interface_name
-                           << "'";
-        }
-
-        if (!fq_name.isFullyQualified()) {
-            return Error() << "Interface name not fully-qualified '" << interface_name << "'";
-        }
-
-        if (fq_name.isValidValueName()) {
-            return Error() << "Interface name must not be a value name '" << interface_name << "'";
-        }
-    }
-
     const std::string fullname = interface_name + "/" + instance_name;
 
     for (const auto& svc : *service_list_) {
@@ -543,19 +524,6 @@ Result<void> ServiceParser::ParseFile(std::vector<std::string>&& args) {
     return {};
 }
 
-Result<void> ServiceParser::ParseUclamp(std::vector<std::string>&& args) {
-    service_->proc_attr_.uclamp_min = 0;
-    service_->proc_attr_.uclamp_max = 1024;
-    if (!ParseInt(args[1], &service_->proc_attr_.uclamp_min, 0, 1024)) {
-        return Error() << "uclamp_min value must be range 0 - 1024";
-    }
-    if (!ParseInt(args[2], &service_->proc_attr_.uclamp_max, 0, 1024)) {
-        return Error() << "uclamp_max value must be range 0 - 1024";
-    }
-
-    return {};
-}
-
 Result<void> ServiceParser::ParseUser(std::vector<std::string>&& args) {
     auto uid = DecodeUid(args[1]);
     if (!uid.ok()) {
@@ -644,7 +612,6 @@ const KeywordMap<ServiceParser::OptionParser>& ServiceParser::GetParserMap() con
         {"stdio_to_kmsg",           {0,     0,    &ServiceParser::ParseStdioToKmsg}},
         {"task_profiles",           {1,     kMax, &ServiceParser::ParseTaskProfiles}},
         {"timeout_period",          {1,     1,    &ServiceParser::ParseTimeoutPeriod}},
-        {"uclamp",                  {2,     2,    &ServiceParser::ParseUclamp}},
         {"updatable",               {0,     0,    &ServiceParser::ParseUpdatable}},
         {"user",                    {1,     1,    &ServiceParser::ParseUser}},
         {"writepid",                {1,     kMax, &ServiceParser::ParseWritepid}},
@@ -713,14 +680,6 @@ Result<void> ServiceParser::EndSection() {
         } else {
             LOG(WARNING) << "No user specified for service '" << service_->name()
                          << "', so it is root.";
-        }
-    }
-
-    if (interface_inheritance_hierarchy_) {
-        if (const auto& check_hierarchy_result = CheckInterfaceInheritanceHierarchy(
-                    service_->interfaces(), *interface_inheritance_hierarchy_);
-            !check_hierarchy_result.ok()) {
-            return Error() << check_hierarchy_result.error();
         }
     }
 

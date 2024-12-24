@@ -86,6 +86,7 @@ struct FstabEntry {
         bool fs_compress : 1;
         bool overlayfs_remove_missing_lowerdir : 1;
         bool is_zoned : 1;
+        bool wrapped_key : 1;
     } fs_mgr_flags = {};
 
     bool is_encryptable() const { return fs_mgr_flags.crypt; }
@@ -152,6 +153,9 @@ bool GetKernelCmdline(const std::string& key, std::string* out);
 
 // Return the "other" slot for the given slot suffix.
 std::string OtherSlotSuffix(const std::string& suffix);
+
+bool GetBootconfigFromString(const std::string& bootconfig, const std::string& key,
+                             std::string* out);
 
 }  // namespace fs_mgr
 }  // namespace android

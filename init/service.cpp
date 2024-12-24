@@ -23,7 +23,6 @@
 #include <sched.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
@@ -100,13 +99,16 @@ static Result<std::string> ComputeContextFromExecutable(const std::string& servi
         free(new_con);
     }
     if (rc == 0 && computed_context == mycon.get()) {
-        return Error() << "File " << service_path << "(labeled \"" << filecon.get()
-                       << "\") has incorrect label or no domain transition from " << mycon.get()
-                       << " to another SELinux domain defined. Have you configured your "
-                          "service correctly? https://source.android.com/security/selinux/"
-                          "device-policy#label_new_services_and_address_denials. Note: this "
-                          "error shows up even in permissive mode in order to make auditing "
-                          "denials possible.";
+        std::string error = StringPrintf(
+                "File %s (labeled \"%s\") has incorrect label or no domain transition from %s to "
+                "another SELinux domain defined. Have you configured your "
+                "service correctly? https://source.android.com/security/selinux/"
+                "device-policy#label_new_services_and_address_denials",
+                service_path.c_str(), filecon.get(), mycon.get());
+        if (security_getenforce() != 0) {
+            return Error() << error;
+        }
+        LOG(ERROR) << error;
     }
     if (rc < 0) {
         return Error() << "Could not get process context";
@@ -159,9 +161,7 @@ Service::Service(const std::string& name, unsigned flags, std::optional<uid_t> u
                  .parsed_uid = uid,
                  .gid = gid,
                  .supp_gids = supp_gids,
-                 .priority = 0,
-                 .uclamp_min = 0,
-                 .uclamp_max = 1024},
+                 .priority = 0},
       namespaces_{.flags = namespace_flags},
       seclabel_(seclabel),
       subcontext_(subcontext_for_restart_commands),
@@ -223,50 +223,7 @@ void Service::KillProcessGroup(int signal) {
     }
 }
 
-#define SCHED_FLAG_KEEP_POLICY 0x08
-#define SCHED_FLAG_KEEP_PARAMS 0x10
-#define SCHED_FLAG_UTIL_CLAMP_MIN 0x20
-#define SCHED_FLAG_UTIL_CLAMP_MAX 0x40
-#define SCHED_FLAG_KEEP_ALL (SCHED_FLAG_KEEP_POLICY | SCHED_FLAG_KEEP_PARAMS)
-
-/* there is no glibc or bionic wrapper */
-struct sched_attr {
-    uint32_t size;
-    uint32_t sched_policy;
-    uint64_t sched_flags;
-    uint32_t sched_nice;
-    uint32_t sched_priority;
-    uint64_t sched_runtime;
-    uint64_t sched_deadline;
-    uint64_t sched_period;
-    uint32_t sched_util_min;
-    uint32_t sched_util_max;
-};
-
-static int SetUclamp(int min, int max) {
-    sched_attr attr = {};
-    attr.size = sizeof(attr);
-
-    attr.sched_flags =
-            (SCHED_FLAG_KEEP_ALL | SCHED_FLAG_UTIL_CLAMP_MIN | SCHED_FLAG_UTIL_CLAMP_MAX);
-    attr.sched_util_min = min;
-    attr.sched_util_max = max;
-#ifdef __ANDROID__
-    return syscall(__NR_sched_setattr, 0, attr, 0);
-#else
-    return 0;
-#endif
-}
-
 void Service::SetProcessAttributesAndCaps(InterprocessFifo setsid_finished) {
-    if (proc_attr_.uclamp_min != 0 || proc_attr_.uclamp_max != 1024) {
-        if (SetUclamp(proc_attr_.uclamp_min, proc_attr_.uclamp_max) != 0) {
-            PLOG(FATAL) << "sched_setattr failed for pid " << getpid()
-                        << ", uclamp_min=" << proc_attr_.uclamp_min
-                        << " uclamp_max=" << proc_attr_.uclamp_max;
-        }
-    }
-
     // Keep capabilites on uid change.
     if (capabilities_ && uid()) {
         // If Android is running in a container, some securebits might already
@@ -698,8 +655,6 @@ Result<void> Service::Start() {
         // remember from which mount namespace the service should start
         SetMountNamespace();
     }
-
-    post_data_ = ServiceList::GetInstance().IsPostData();
 
     LOG(INFO) << "starting service '" << name_ << "'...";
 

@@ -31,13 +31,11 @@
 #include <sys/mman.h>
 #include <sys/poll.h>
 #include <sys/select.h>
+#include <sys/system_properties.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <wchar.h>
-
-#define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
-#include <sys/_system_properties.h>
 
 #include <map>
 #include <memory>
@@ -48,7 +46,6 @@
 #include <thread>
 #include <vector>
 
-#include <InitProperties.sysprop.h>
 #include <android-base/chrono_utils.h>
 #include <android-base/file.h>
 #include <android-base/logging.h>
@@ -77,6 +74,7 @@
 #include "subcontext.h"
 #include "system/core/init/property_service.pb.h"
 #include "util.h"
+#include "vendor_init.h"
 
 static constexpr char APPCOMPAT_OVERRIDE_PROP_FOLDERNAME[] =
         "/dev/__properties__/appcompat_override";
@@ -102,7 +100,6 @@ using android::properties::BuildTrie;
 using android::properties::ParsePropertyInfoFile;
 using android::properties::PropertyInfoAreaFile;
 using android::properties::PropertyInfoEntry;
-using android::sysprop::InitProperties::is_userspace_reboot_supported;
 
 namespace android {
 namespace init {
@@ -134,6 +131,8 @@ struct PropertyAuditData {
     const ucred* cr;
     const char* name;
 };
+
+static bool weaken_prop_override_security = false;
 
 static int PropertyAuditCallback(void* data, security_class_t /*cls*/, char* buf, size_t len) {
     auto* d = reinterpret_cast<PropertyAuditData*>(data);
@@ -409,8 +408,8 @@ static std::optional<uint32_t> PropertySet(const std::string& name, const std::s
     } else {
         prop_info* pi = (prop_info*)__system_property_find(name.c_str());
         if (pi != nullptr) {
-            // ro.* properties are actually "write-once".
-            if (StartsWith(name, "ro.")) {
+            // ro.* properties are actually "write-once", unless the system decides to
+            if (StartsWith(name, "ro.") && !weaken_prop_override_security) {
                 *error = "Read-only property was already set";
                 return {PROP_ERROR_READ_ONLY_PROPERTY};
             }
@@ -569,8 +568,8 @@ std::optional<uint32_t> HandlePropertySet(const std::string& name, const std::st
         }
         LOG(INFO) << "Received sys.powerctl='" << value << "' from pid: " << cr.pid
                   << process_log_string;
-        if (value == "reboot,userspace" && !is_userspace_reboot_supported().value_or(false)) {
-            *error = "Userspace reboot is not supported by this device";
+        if (value == "reboot,userspace") {
+            *error = "Userspace reboot is deprecated.";
             return {PROP_ERROR_INVALID_VALUE};
         }
     }
@@ -849,13 +848,13 @@ static void LoadPropertiesFromSecondStageRes(std::map<std::string, std::string>*
 // So we need to apply the same rule of build/make/tools/post_process_props.py
 // on runtime.
 static void update_sys_usb_config() {
-    bool is_debuggable = android::base::GetBoolProperty("ro.debuggable", false);
+    bool is_eng = !android::base::GetBoolProperty("ro.adb.secure", true);
     std::string config = android::base::GetProperty("persist.sys.usb.config", "");
     // b/150130503, add (config == "none") condition here to prevent appending
     // ",adb" if "none" is explicitly defined in default prop.
     if (config.empty() || config == "none") {
-        InitPropertySet("persist.sys.usb.config", is_debuggable ? "adb" : "none");
-    } else if (is_debuggable && config.find("adb") == std::string::npos &&
+        InitPropertySet("persist.sys.usb.config", is_eng ? "adb" : "none");
+    } else if (is_eng && config.find("adb") == std::string::npos &&
                config.length() + 4 < PROP_VALUE_MAX) {
         config.append(",adb");
         InitPropertySet("persist.sys.usb.config", config);
@@ -1245,6 +1244,12 @@ void PropertyLoadBootDefaults() {
         }
     }
 
+    // Weaken property override security during execution of the vendor init extension
+    weaken_prop_override_security = true;
+
+    // Update with vendor-specific property runtime overrides
+    vendor_load_properties();
+
     property_initialize_ro_product_props();
     property_initialize_build_id();
     property_derive_build_fingerprint();
@@ -1252,7 +1257,20 @@ void PropertyLoadBootDefaults() {
     property_initialize_ro_cpu_abilist();
     property_initialize_ro_vendor_api_level();
 
+    // Restore the normal property override security after init extension is executed
+    weaken_prop_override_security = false;
+
     update_sys_usb_config();
+}
+
+void PropertyLoadDerivedDefaults() {
+    const char* PAGE_PROP = "ro.boot.hardware.cpu.pagesize";
+    if (GetProperty(PAGE_PROP, "").empty()) {
+        std::string error;
+        if (PropertySetNoSocket(PAGE_PROP, std::to_string(getpagesize()), &error) != PROP_SUCCESS) {
+            LOG(ERROR) << "Could not set '" << PAGE_PROP << "' because: " << error;
+        }
+    }
 }
 
 bool LoadPropertyInfoFromFile(const std::string& filename,
@@ -1401,18 +1419,44 @@ static void ProcessBootconfig() {
 }
 
 static void SetSafetyNetProps() {
-    // Bail out if this is recovery, fastbootd, or anything other than a normal boot.
-    // fastbootd, in particular, needs the real values so it can allow flashing on
-    // unlocked bootloaders.
-    if (IsRecoveryMode()) {
-        return;
-    }
-
-    // Spoof properties
     InitPropertySet("ro.boot.flash.locked", "1");
-    InitPropertySet("ro.boot.verifiedbootstate", "green");
-    InitPropertySet("ro.boot.veritymode", "enforcing");
     InitPropertySet("ro.boot.vbmeta.device_state", "locked");
+    InitPropertySet("ro.boot.verifiedbootstate", "green");
+    InitPropertySet("ro.boot.flash.locked", "1");
+    InitPropertySet("ro.boot.selinux", "enforcing");
+    InitPropertySet("ro.boot.veritymode", "enforcing");
+    InitPropertySet("ro.boot.warranty_bit", "0");
+    InitPropertySet("ro.warranty_bit", "0");
+    InitPropertySet("ro.debuggable", "0");
+    InitPropertySet("ro.force.debuggable", "0");
+    InitPropertySet("ro.adb.secure", "1");
+    InitPropertySet("ro.secure", "1");
+    InitPropertySet("ro.bootimage.build.type", "user");
+    InitPropertySet("ro.build.type", "user");
+    InitPropertySet("ro.system.build.type", "user");
+    InitPropertySet("ro.system_ext.build.type", "user");
+    InitPropertySet("ro.vendor.build.type", "user");
+    InitPropertySet("ro.vendor_dlkm.build.type", "user");
+    InitPropertySet("ro.product.build.type", "user");
+    InitPropertySet("ro.odm.build.type", "user");
+    InitPropertySet("ro.build.keys", "release-keys");
+    InitPropertySet("ro.build.tags", "release-keys");
+    InitPropertySet("ro.bootimage.build.tags", "release-keys");
+    InitPropertySet("ro.odm.build.tags", "release-keys");
+    InitPropertySet("ro.product.build.tags", "release-keys");
+    InitPropertySet("ro.system.build.tags", "release-keys");
+    InitPropertySet("ro.system_ext.build.tags", "release-keys");
+    InitPropertySet("ro.vendor.build.tags", "release-keys");
+    InitPropertySet("ro.vendor_dlkm.build.tags", "release-keys");
+    InitPropertySet("ro.vendor.boot.warranty_bit", "0");
+    InitPropertySet("ro.vendor.warranty_bit", "0");
+    InitPropertySet("vendor.boot.vbmeta.device_state", "locked");
+    InitPropertySet("vendor.boot.verifiedbootstate", "green");
+    InitPropertySet("oplusboot.verifiedbootstate", "green");
+    InitPropertySet("sys.oem_unlock_allowed", "0");
+#ifdef SPOOF_FIRST_API_LEVEL_32
+    InitPropertySet("ro.product.first_api_level", "32");
+#endif
 }
 
 void PropertyInit() {
@@ -1429,8 +1473,15 @@ void PropertyInit() {
         LOG(FATAL) << "Failed to load serialized property info file";
     }
 
-    // Report valid verified boot chain to help pass Google SafetyNet integrity checks
-    SetSafetyNetProps();
+    // Report a valid verified boot chain to make Google SafetyNet integrity
+    // checks pass. This needs to be done before parsing the kernel cmdline as
+    // these properties are read-only and will be set to invalid values with
+    // androidboot cmdline arguments.
+    if (SPOOF_SAFETYNET) {
+      if (!IsRecoveryMode()) {
+        SetSafetyNetProps();
+      }
+    }
 
     // If arguments are passed both on the command line and in DT,
     // properties set in DT always have priority over the command-line ones.
@@ -1443,6 +1494,7 @@ void PropertyInit() {
     ExportKernelBootProps();
 
     PropertyLoadBootDefaults();
+    PropertyLoadDerivedDefaults();
 }
 
 static void HandleInitSocket() {

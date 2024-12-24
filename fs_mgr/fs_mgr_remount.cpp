@@ -171,11 +171,12 @@ bool VerifyCheckpointing() {
         }
         if (show_help) {
             show_help = false;
-            std::cerr << "WARNING: Userdata checkpoint is in progress. To force end checkpointing, "
-                         "call 'vdc checkpoint commitChanges'. This can lead to data corruption if "
-                         "rolled back."
+            std::cerr << "WARNING: Userdata checkpoint is in progress. "
+                         "To forcibly end checkpointing, "
+                         "call 'vdc checkpoint commitChanges'. "
+                         "This can lead to data corruption if rolled back."
                       << std::endl;
-            LOG(INFO) << "Waiting for checkpoint to complete and then continue remount.";
+            LOG(INFO) << "Waiting for checkpoint to complete before remounting...";
         }
         std::this_thread::sleep_for(4s);
     }
@@ -629,14 +630,12 @@ int main(int argc, char* argv[]) {
     // If somehow this executable is delivered on a "user" build, it can
     // not function, so providing a clear message to the caller rather than
     // letting if fall through and provide a lot of confusing failure messages.
-    if (!ALLOW_ADBD_DISABLE_VERITY || !android::base::GetBoolProperty("ro.debuggable", false)) {
+    if (!ALLOW_ADBD_DISABLE_VERITY) {
         LOG(ERROR) << "Device must be userdebug build";
         return EXIT_FAILURE;
     }
 
-#if 0
-    // We already use safety net hacks which spoof to green state.
-    // Remove this check completely.
+#if ALLOW_ADBD_DISABLE_VERITY == 0  // "user" build
     if (android::base::GetProperty("ro.boot.verifiedbootstate", "") != "orange") {
         LOG(ERROR) << "Device must be bootloader unlocked";
         return EXIT_FAILURE;

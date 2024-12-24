@@ -46,6 +46,8 @@
 
 #define POWER_SUPPLY_SUBSYSTEM "power_supply"
 #define POWER_SUPPLY_SYSFS_PATH "/sys/class/" POWER_SUPPLY_SUBSYSTEM
+#define SYSFS_BATTERY_CURRENT "/sys/class/power_supply/battery/current_now"
+#define SYSFS_BATTERY_VOLTAGE "/sys/class/power_supply/battery/voltage_now"
 #define FAKE_BATTERY_CAPACITY 42
 #define FAKE_BATTERY_TEMPERATURE 424
 #define MILLION 1.0e6
@@ -315,6 +317,7 @@ static BatteryMonitor::PowerSupplyType readPowerSupplyType(const String8& path) 
             {"USB_PD_DRP", BatteryMonitor::ANDROID_POWER_SUPPLY_TYPE_USB},
             {"Wireless", BatteryMonitor::ANDROID_POWER_SUPPLY_TYPE_WIRELESS},
             {"Dock", BatteryMonitor::ANDROID_POWER_SUPPLY_TYPE_DOCK},
+            {"DASH", BatteryMonitor::ANDROID_POWER_SUPPLY_TYPE_AC},
             {NULL, 0},
     };
     std::string buf;
@@ -467,6 +470,7 @@ void BatteryMonitor::updateValues(void) {
             case ANDROID_POWER_SUPPLY_TYPE_AC:
             case ANDROID_POWER_SUPPLY_TYPE_USB:
             case ANDROID_POWER_SUPPLY_TYPE_WIRELESS:
+            case ANDROID_POWER_SUPPLY_TYPE_DOCK:
                 path.clear();
                 path.appendFormat("%s/%s/online", POWER_SUPPLY_SYSFS_PATH, name);
                 if (access(path.c_str(), R_OK) == 0)
@@ -474,6 +478,17 @@ void BatteryMonitor::updateValues(void) {
                 break;
             default:
                 break;
+            }
+
+            // Look for "is_dock" file
+            path.clear();
+            path.appendFormat("%s/%s/is_dock", POWER_SUPPLY_SYSFS_PATH, name);
+            if (access(path.c_str(), R_OK) == 0) {
+                path.clear();
+                path.appendFormat("%s/%s/online", POWER_SUPPLY_SYSFS_PATH, name);
+                if (access(path.c_str(), R_OK) == 0)
+                    mChargerNames.add(String8(name));
+
             }
         }
     }
@@ -507,22 +522,12 @@ void BatteryMonitor::updateValues(void) {
                     KLOG_WARNING(LOG_TAG, "%s: Unknown power supply type\n",
                                  mChargerNames[i].c_str());
             }
-            path.clear();
-            path.appendFormat("%s/%s/current_max", POWER_SUPPLY_SYSFS_PATH,
-                              mChargerNames[i].c_str());
-            int ChargingCurrent = (access(path.c_str(), R_OK) == 0) ? getIntField(path) : 0;
-
-            path.clear();
-            path.appendFormat("%s/%s/voltage_max", POWER_SUPPLY_SYSFS_PATH,
-                              mChargerNames[i].c_str());
+            int ChargingCurrent =
+                  (access(SYSFS_BATTERY_CURRENT, R_OK) == 0) ? abs(getIntField(String8(SYSFS_BATTERY_CURRENT))) : 0;
 
             int ChargingVoltage =
-                    (access(path.c_str(), R_OK) == 0) ? getIntField(path) : DEFAULT_VBUS_VOLTAGE;
-
-            // there are devices that have the file but with a value of 0
-            if (ChargingVoltage == 0) {
-                ChargingVoltage = DEFAULT_VBUS_VOLTAGE;
-            }
+                  (access(SYSFS_BATTERY_VOLTAGE, R_OK) == 0) ? getIntField(String8(SYSFS_BATTERY_VOLTAGE)) :
+                   DEFAULT_VBUS_VOLTAGE;
 
             double power = ((double)ChargingCurrent / MILLION) *
                            ((double)ChargingVoltage / MILLION);

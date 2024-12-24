@@ -26,12 +26,10 @@
 #include <sys/eventfd.h>
 #include <sys/mount.h>
 #include <sys/signalfd.h>
+#include <sys/system_properties.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <unistd.h>
-
-#define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
-#include <sys/_system_properties.h>
 
 #include <filesystem>
 #include <fstream>
@@ -54,6 +52,7 @@
 #include <android-base/thread_annotations.h>
 #include <fs_avb/fs_avb.h>
 #include <fs_mgr_vendor_overlay.h>
+#include <keyutils.h>
 #include <libavb/libavb.h>
 #include <libgsi/libgsi.h>
 #include <libsnapshot/snapshot.h>
@@ -270,8 +269,8 @@ void DumpState() {
 Parser CreateParser(ActionManager& action_manager, ServiceList& service_list) {
     Parser parser;
 
-    parser.AddSectionParser("service", std::make_unique<ServiceParser>(
-                                               &service_list, GetSubcontext(), std::nullopt));
+    parser.AddSectionParser("service",
+                            std::make_unique<ServiceParser>(&service_list, GetSubcontext()));
     parser.AddSectionParser("on", std::make_unique<ActionParser>(&action_manager, GetSubcontext()));
     parser.AddSectionParser("import", std::make_unique<ImportParser>(&parser));
 
@@ -326,9 +325,7 @@ Parser CreateApexConfigParser(ActionManager& action_manager, ServiceList& servic
         }
     }
 #endif  // RECOVERY
-    parser.AddSectionParser("service",
-                            std::make_unique<ServiceParser>(&service_list, subcontext,
-                            std::nullopt));
+    parser.AddSectionParser("service", std::make_unique<ServiceParser>(&service_list, subcontext));
     parser.AddSectionParser("on", std::make_unique<ActionParser>(&action_manager, subcontext));
 
     return parser;
@@ -969,6 +966,11 @@ int SecondStageMain(int argc, char** argv) {
         LOG(ERROR) << "Unable to write " << DEFAULT_OOM_SCORE_ADJUST
                    << " to /proc/1/oom_score_adj: " << result.error();
     }
+
+    // Set up a session keyring that all processes will have access to. It
+    // will hold things like FBE encryption keys. No process should override
+    // its session keyring.
+    keyctl_get_keyring_ID(KEY_SPEC_SESSION_KEYRING, 1);
 
     // Indicate that booting is in progress to background fw loaders, etc.
     close(open("/dev/.booting", O_WRONLY | O_CREAT | O_CLOEXEC, 0000));

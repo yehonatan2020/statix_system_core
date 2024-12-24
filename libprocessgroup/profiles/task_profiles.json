@@ -11,14 +11,14 @@
       "File": "foreground/cpus"
     },
     {
+      "Name": "HighCapacityWICPUs",
+      "Controller": "cpuset",
+      "File": "foreground_window/cpus"
+    },
+    {
       "Name": "MaxCapacityCPUs",
       "Controller": "cpuset",
       "File": "top-app/cpus"
-    },
-    {
-      "Name": "AudioAppCapacityCPUs",
-      "Controller": "cpuset",
-      "File": "audio-app/cpus"
     },
     {
       "Name": "MemStats",
@@ -81,21 +81,6 @@
       "Name": "FreezerState",
       "Controller": "freezer",
       "File": "cgroup.freeze"
-    },
-    {
-      "Name": "BfqWeight",
-      "Controller": "io",
-      "File": "io.bfq.weight"
-    },
-    {
-      "Name": "CfqGroupIdle",
-      "Controller": "io",
-      "File": "io.group_idle"
-    },
-    {
-      "Name": "CfqWeight",
-      "Controller": "io",
-      "File": "io.weight"
     }
   ],
 
@@ -179,6 +164,19 @@
       ]
     },
     {
+      "Name": "HighPerformanceWI",
+      "Actions": [
+        {
+          "Name": "JoinCgroup",
+          "Params":
+          {
+            "Controller": "cpu",
+            "Path": "foreground_window"
+          }
+        }
+      ]
+    },
+    {
       "Name": "MaxPerformance",
       "Actions": [
         {
@@ -213,19 +211,6 @@
           {
             "Controller": "cpu",
             "Path": "camera-daemon"
-          }
-        }
-      ]
-    },
-    {
-      "Name": "AudioAppPerformance",
-      "Actions" : [
-        {
-          "Name" : "JoinCgroup",
-          "Params" :
-          {
-            "Controller": "schedtune",
-            "Path": "audio-app"
           }
         }
       ]
@@ -415,6 +400,19 @@
       ]
     },
     {
+      "Name": "ProcessCapacityHighWI",
+      "Actions": [
+        {
+          "Name": "JoinCgroup",
+          "Params":
+          {
+            "Controller": "cpuset",
+            "Path": "foreground_window"
+          }
+        }
+      ]
+    },
+    {
       "Name": "ProcessCapacityMax",
       "Actions": [
         {
@@ -469,46 +467,6 @@
       ]
     },
     {
-      "Name": "AudioAppCapacity",
-      "Actions" : [
-        {
-          "Name" : "JoinCgroup",
-          "Params" :
-          {
-            "Controller": "cpuset",
-            "Path": "audio-app"
-          }
-        }
-      ]
-    },
-
-    {
-      "Name": "BlkIOForeground",
-      "Actions" : [
-        {
-          "Name" : "JoinCgroup",
-          "Params" :
-          {
-            "Controller": "blkio",
-            "Path": ""
-          }
-        }
-      ]
-    },
-    {
-      "Name": "BlkIOBackground",
-      "Actions" : [
-        {
-          "Name" : "JoinCgroup",
-          "Params" :
-          {
-            "Controller": "blkio",
-            "Path": "bg"
-          }
-        }
-      ]
-    },
-    {
       "Name": "LowIoPriority",
       "Actions": [
         {
@@ -517,33 +475,6 @@
           {
             "Controller": "blkio",
             "Path": "background"
-	  }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "BfqWeight",
-            "Value": "10",
-            "Optional": "true"
-          }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "CfqGroupIdle",
-            "Value": "0",
-            "Optional": "true"
-          }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "CfqWeight",
-            "Value": "200",
-            "Optional": "true"
           }
         }
       ]
@@ -557,33 +488,6 @@
           {
             "Controller": "blkio",
             "Path": ""
-	  }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "BfqWeight",
-            "Value": "100",
-            "Optional": "true"
-          }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "CfqGroupIdle",
-            "Value": "0",
-            "Optional": "true"
-          }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "CfqWeight",
-            "Value": "1000",
-            "Optional": "true"
           }
         }
       ]
@@ -597,33 +501,6 @@
           {
             "Controller": "blkio",
             "Path": ""
-	  }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "BfqWeight",
-            "Value": "100",
-            "Optional": "true"
-          }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "CfqGroupIdle",
-            "Value": "0",
-            "Optional": "true"
-          }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "CfqWeight",
-            "Value": "1000",
-            "Optional": "true"
           }
         }
       ]
@@ -637,33 +514,6 @@
           {
             "Controller": "blkio",
             "Path": ""
-	  }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "BfqWeight",
-            "Value": "100",
-            "Optional": "true"
-          }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "CfqGroupIdle",
-            "Value": "0",
-            "Optional": "true"
-          }
-        },
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "CfqWeight",
-            "Value": "1000",
-            "Optional": "true"
           }
         }
       ]
@@ -702,7 +552,7 @@
           "Params":
           {
             "Controller": "cpuset",
-            "Path": "top-app"
+            "Path": "system-background"
           }
         }
       ]
@@ -715,7 +565,7 @@
           "Params":
           {
             "Controller": "cpuset",
-            "Path": "top-app"
+            "Path": "system-background"
           }
         }
       ]
@@ -820,6 +670,10 @@
       "Profiles": [ "HighPerformance", "HighIoPriority", "TimerSlackNormal" ]
     },
     {
+      "Name": "SCHED_SP_FOREGROUND_WINDOW",
+      "Profiles": [ "HighPerformanceWI", "HighIoPriority", "TimerSlackNormal" ]
+    },
+    {
       "Name": "SCHED_SP_TOP_APP",
       "Profiles": [ "MaxPerformance", "MaxIoPriority", "TimerSlackNormal" ]
     },
@@ -848,6 +702,10 @@
       "Profiles": [ "HighPerformance", "ProcessCapacityHigh", "HighIoPriority", "TimerSlackNormal" ]
     },
     {
+      "Name": "CPUSET_SP_FOREGROUND_WINDOW",
+      "Profiles": [ "HighPerformanceWI", "ProcessCapacityHighWI", "HighIoPriority", "TimerSlackNormal" ]
+    },
+    {
       "Name": "CPUSET_SP_TOP_APP",
       "Profiles": [ "MaxPerformance", "ProcessCapacityMax", "MaxIoPriority", "TimerSlackNormal" ]
     },
@@ -870,6 +728,10 @@
     {
       "Name": "OtaProfiles",
       "Profiles": [ "ServiceCapacityLow", "LowIoPriority", "HighEnergySaving" ]
+    },
+    {
+      "Name": "InputPolicy",
+      "Profiles": [ "MaxPerformance", "ProcessCapacityMax", "TimerSlackNormal" ]
     }
   ]
 }
